@@ -1,0 +1,146 @@
+version: "3"
+
+networks:
+  grafana:
+
+volumes:
+  app_data: {}
+
+x-logging:
+  &default-logging
+  driver: json-file
+  options:
+    tag: "{{.ImageName}}|{{.Name}}|{{.ImageFullID}}|{{.FullID}}"
+
+services: 
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    ports:
+      - "9100:9100"
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    networks:
+      - grafana
+    volumes:
+      - '/:/host:ro,rslave'
+
+  gpu_exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:2.0.13-2.1.2-ubuntu20.04
+    container_name: gpu_exporter
+    ports:
+      - "9400:9400"
+    networks:
+      - grafana
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: [gpu]
+    
+  loki:
+      image: grafana/loki:master
+      container_name: loki
+      ports:
+        - "3100:3100"
+      volumes:
+        - ./config/loki-config.yaml:/etc/loki/loki-config.yaml
+      command: -config.file=/etc/loki/loki-config.yaml
+      networks:
+        - grafana
+
+  promtail:
+      depends_on:
+        - loki
+      container_name: promtail
+      image: grafana/promtail:master
+      volumes:
+        - /var/log:/var/log
+        - /var/lib/docker/containers:/var/lib/docker/containers
+        - ./config/promtail-config.yaml:/etc/promtail/promtail-config.yaml
+      command: -config.file=/etc/promtail/promtail-config.yaml
+      networks:
+        - grafana
+
+  cadvisor:
+      image: google/cadvisor:v0.33.0
+      container_name: cadvisor
+      volumes:
+        - /:/rootfs:ro
+        - /var/run:/var/run:ro
+        - /sys:/sys:ro
+        - /var/lib/docker/:/var/lib/docker:ro
+        - /dev/disk/:/dev/disk:ro
+      networks:
+        - grafana
+  # loki:
+  #   image: grafana/loki:latest
+  #   container_name: loki
+  #   volumes:
+  #     # - app_data:/var/log
+  #     - ./loki:/etc/loki
+  #     - ./config/loki-config.yaml:/etc/config/loki-config.yaml
+  #   command:
+  #     - "--config.file=/etc/config/loki-config.yaml"
+  #   ports:
+  #     - "3100:3100"
+
+  # promtail:
+  #   depends_on:
+  #     - loki
+  #   image: grafana/promtail:latest
+  #   container_name: promtail
+  #   volumes:
+  #     - app_data:/var/log
+  #     - /var/lib/docker/containers:/host/containers
+  #     - ./promtail:/etc/promtail
+  #     - ./config/promtail-config.yaml:/etc/config/promtail-config.yaml
+  #   command: 
+  #     - "--config.file=/etc/config/promtail-config.yaml"
+  #   networks:
+  #     - grafana
+
+  iris:
+    build: ./iris_service
+    container_name: iris
+    ports:
+      - 8000:8000
+    command: uvicorn --host 0.0.0.0 iris.app:app
+    volumes:
+      - app_data:/var/log
+    networks:
+      - grafana
+    logging: *default-logging
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.34.0
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - 9090:9090
+    networks:
+      - grafana
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - 3000:3000
+    networks:
+      - grafana
+    volumes:
+      # - app_data:/var/log
+      - ./config/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./config/providers.yaml:/etc/grafana/provisioning/dashboards/providers.yml
+
+  db:
+    image: grafana/tns-db:latest
+    container_name: db
+    ports:
+      - 8082:80
+    networks:
+      - grafana

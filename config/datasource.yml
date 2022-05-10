@@ -1,0 +1,24 @@
+# config file version
+apiVersion: 1
+
+deleteDatasources:
+  - name: loki
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    orgId: 1
+    url: http://loki:3100
+    isDefault: true
+    version: 1
+    editable: true
+  - name: prometheus
+    access: proxy
+    type: prometheus
+    url: http://prometheus:9090
+    isDefault: false
+    orgId: 1
+    editable: false
+    jsonData:
+      timeInterval: 10s
